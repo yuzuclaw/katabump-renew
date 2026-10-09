@@ -39,8 +39,18 @@ jobs:
         continue-on-error: true
         env:
           NODE_LINK: ${{ secrets.NODE_LINK }}
+          GH_API_TOKEN: ${{ github.token }}   # 给脚本查 sing-box 版本用，避免 GitHub API 限流
         run: |
-          bash <(wget -qO- https://main.ssss.nyc.mn/setup_proxy.sh)
+          bash scripts/setup_proxy.sh
+
+      - name: 🔌 确认代理是否真的起来了
+        if: always()
+        run: |
+          if [ "${IS_PROXY:-false}" = "true" ]; then
+            echo "✅ 代理已就绪: ${PROXY_SERVER:-未知}"
+          else
+            echo "::warning::代理没起来，本次走直连 —— GitHub 机房 IP 有过不了 CF 盾的风险，看到红多半是这儿"
+          fi
 
       - name: 🚀 运行续期脚本
         env:
