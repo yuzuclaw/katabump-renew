@@ -7,9 +7,15 @@ on:
     - cron: '0 2 * * *'
   workflow_dispatch:          # 支持手动触发
 
+# 同一时间只跑一个，避免手动触发和定时撞车
+concurrency:
+  group: katabump-renew
+  cancel-in-progress: false
+
 jobs:
   Renew-Katabump:
     runs-on: ubuntu-latest
+    timeout-minutes: 20         # 卡住就自己了断，不会挂在那干等
     permissions:
       actions: write          # 用于清理旧运行记录
       contents: read
