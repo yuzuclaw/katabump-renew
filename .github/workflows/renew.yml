@@ -1,59 +1,98 @@
 name: Katabump Auto Renew
 
+# 每 3 天跑一次（UTC 02:00 = 北京时间 10:00）
+# 想改成"每天"：把 cron 换成 '0 2 * * *'
 on:
   schedule:
-  - cron: '0 2 */3 * *'  # 每天 UTC 0点 (北京时间 8点) 运行,根据服务到期时间自行修改
-  workflow_dispatch: # 允许手动触发
+    - cron: '0 2 */3 * *'
+  workflow_dispatch:          # 支持手动触发
 
 jobs:
   Renew-Katabump:
     runs-on: ubuntu-latest
     permissions:
-      actions: write  
+      actions: write          # 用于清理旧运行记录
       contents: read
-    
+
     steps:
-    - uses: actions/checkout@v6
-    - name: ⚙ 设置 Python
-      uses: actions/setup-python@v6
-      with:
-        python-version: '3.12'
+      - uses: actions/checkout@v6
 
-    - name: 🛠️ 安装系统依赖和python依赖
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y xvfb x11-utils xdotool scrot fonts-noto-cjk
-        pip install seleniumbase requests
-        seleniumbase install chromedriver
+      - name: ⚙ 设置 Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
 
-    - name: ⚙ 设置代理 (sing-box)
-      continue-on-error: true
-      env:
-        NODE_LINK: ${{ secrets.NODE_LINK }}
-      run: |
-        bash <(wget -qO- https://main.ssss.nyc.mn/setup_proxy.sh)
+      - name: 🛠️ 安装系统依赖和 python 依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb x11-utils xdotool scrot fonts-noto-cjk
+          pip install seleniumbase requests
+          seleniumbase install chromedriver
 
-    - name: 🚀 运行续期脚本
-      env:
-        KATABUMP_EMAIL: ${{ secrets.KATABUMP_EMAIL }}
-        KATABUMP_PASSWORD: ${{ secrets.KATABUMP_PASSWORD }}
-        TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
-        TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-      run: |
-        xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" \
-          python3 app.py
-        
-    - name: 🧹 清理旧的工作流运行记录
-      if: always()
-      env:
-        GH_TOKEN: ${{ github.token }}
-      run: |
-        runs=$(gh run list --workflow="${{ github.workflow }}" --limit=100 --json databaseId --jq '.[].databaseId')
-        count=0
-        for run_id in $runs; do
-          count=$((count + 1))
-          if [ $count -gt 1 ]; then
-            echo "删除运行记录: $run_id"
-            gh run delete $run_id || true
+      - name: ⚙ 设置代理 (sing-box)
+        continue-on-error: true
+        env:
+          NODE_LINK: ${{ secrets.NODE_LINK }}
+        run: |
+          bash <(wget -qO- https://main.ssss.nyc.mn/setup_proxy.sh)
+
+      - name: 🚀 运行续期脚本
+        env:
+          KATABUMP_EMAIL: ${{ secrets.KATABUMP_EMAIL }}
+          KATABUMP_PASSWORD: ${{ secrets.KATABUMP_PASSWORD }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: |
+          set -o pipefail
+          xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" \
+            python3 app.py 2>&1 | tee renew.log
+
+      # 上游 app.py 无论成败都 exit 0（会"绿着失败"），这里补一道判定
+      - name: 🔎 判定续期结果
+        if: always()
+        run: |
+          echo "----- 结果判定 -----"
+          if [ ! -f renew.log ]; then
+            echo "::error::没有产生 renew.log，脚本根本没跑起来"
+            exit 1
           fi
-        done
+          if grep -q "❌ 登录失败" renew.log; then
+            echo "::error::登录失败 —— 本次没有完成续期（多半是 Turnstile/CF 盾没过）"
+            exit 1
+          fi
+          if grep -q "❌ Turnstile" renew.log; then
+            echo "::error::Turnstile 验证 6 次均失败 —— 出口 IP 太脏，换个干净节点"
+            exit 1
+          fi
+          if grep -q "登录成功" renew.log; then
+            echo "✅ 登录成功"
+          fi
+          if grep -q "未检测到明确的提示框" renew.log; then
+            echo "::warning::登录成功了，但没拿到明确的续期结果提示，请人工确认一次"
+          fi
+
+      - name: 📤 上传日志与截图（失败时排查用）
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: renew-debug
+          path: |
+            renew.log
+            *.png
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: 🧹 清理旧的工作流运行记录
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          runs=$(gh run list --workflow="${{ github.workflow }}" --limit=100 --json databaseId --jq '.[].databaseId')
+          count=0
+          for run_id in $runs; do
+            count=$((count + 1))
+            if [ $count -gt 1 ]; then
+              echo "删除运行记录: $run_id"
+              gh run delete $run_id || true
+            fi
+          done
