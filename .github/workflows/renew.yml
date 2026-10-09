@@ -56,8 +56,9 @@ jobs:
         env:
           KATABUMP_EMAIL: ${{ secrets.KATABUMP_EMAIL }}
           KATABUMP_PASSWORD: ${{ secrets.KATABUMP_PASSWORD }}
-          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
-          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          # 注意：这里故意不传 TG_BOT_TOKEN / TG_CHAT_ID。
+          # app.py 自己那套推送把「下次可续期时间」丢掉了（参数接了不用），
+          # 所以通知统一交给下面 scripts/notify.py 发，避免重复两条。
         run: |
           set -o pipefail
           xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" \
@@ -97,6 +98,16 @@ jobs:
           fi
           echo "::warning::没匹配到任何明确的续期结果，请人工确认"
           exit 1
+
+      - name: 📣 发 Telegram 通知
+        if: always()
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          KATABUMP_EMAIL: ${{ secrets.KATABUMP_EMAIL }}
+          RUN_NUMBER: ${{ github.run_number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: python3 scripts/notify.py
 
       - name: 📤 上传日志与截图（失败时排查用）
         if: always()
