@@ -1,0 +1,27 @@
+name: Keepalive
+
+# GitHub 对「60 天内没有任何仓库活动」的仓库会自动停用其定时工作流。
+# 定时任务本身不算活动，所以每月打一次卡，把定时续期保住。
+on:
+  schedule:
+    - cron: '0 3 1 * *'       # 每月 1 号 UTC 03:00（北京时间 11:00）
+  workflow_dispatch:
+
+jobs:
+  Keepalive:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: 🫀 打一次卡
+        run: |
+          mkdir -p .keepalive
+          date -u +"%Y-%m-%dT%H:%M:%SZ" > .keepalive/last-ping.txt
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .keepalive/last-ping.txt
+          git diff --cached --quiet && echo "无变化" || git commit -m "chore: keepalive $(date -u +%Y-%m-%d)"
+          git push
